@@ -1,0 +1,68 @@
+# =============================================================
+# GitLab CI 配置（自建 GitLab 版本）
+# 与 .github/workflows/ci.yml + cd.yml 功能等价：
+#   构建测试 → 构建镜像 → 推送 Harbor →（手动）部署 K8s
+#
+# 使用前请在 GitLab → Settings → CI/CD → Variables 配置：
+#   HARBOR_REGISTRY   Harbor 地址，如 harbor.example.com
+#   HARBOR_USER       推送账号
+#   HARBOR_PASSWORD   推送密码
+# 若 Harbor 为 HTTP/自签证书，runner 的 dind 需加 --insecure-registry
+# =============================================================
+
+stages:
+  - build
+  - package
+  - deploy
+
+variables:
+  HARBOR_REGISTRY: "harbor.example.com"   # TODO: 改成你的 Harbor 地址
+  HARBOR_PROJECT: "spring-demo"
+  IMAGE_TAG: "$CI_COMMIT_SHORT_SHA"
+  MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+
+cache:
+  key: "$CI_COMMIT_REF_SLUG"
+  paths:
+    - .m2/repository/
+
+# --- 构建 + 测试（等价 GitHub Actions 的 CI） ---
+build:
+  stage: build
+  image: maven:3.8-openjdk-8
+  script:
+    - mvn -B clean package
+  artifacts:
+    paths:
+      - target/spring-demo-*.jar
+    expire_in: 1 week
+
+# --- 构建镜像并推送 Harbor（等价 GitHub Actions 的 CD） ---
+docker-build:
+  stage: package
+  image: docker:20.10
+  services:
+    - docker:20.10-dind
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    - docker login -u "$HARBOR_USER" -p "$HARBOR_PASSWORD" "$HARBOR_REGISTRY"
+  script:
+    - docker build -t "$HARBOR_REGISTRY/$HARBOR_PROJECT:$IMAGE_TAG" .
+    - docker tag "$HARBOR_REGISTRY/$HARBOR_PROJECT:$IMAGE_TAG" "$HARBOR_REGISTRY/$HARBOR_PROJECT:latest"
+    - docker push "$HARBOR_REGISTRY/$HARBOR_PROJECT:$IMAGE_TAG"
+    - docker push "$HARBOR_REGISTRY/$HARBOR_PROJECT:latest"
+  only:
+    - main
+
+# --- 部署到 K8s（手动触发；需在 Runner 环境配置 kubeconfig） ---
+deploy:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  script:
+    - kubectl set image deployment/spring-demo spring-demo="$HARBOR_REGISTRY/$HARBOR_PROJECT:$IMAGE_TAG"
+  only:
+    - main
+  when: manual
+  environment:
+    name: production

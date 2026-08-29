@@ -11,6 +11,7 @@
 ├── .github/workflows/
 │   ├── ci.yml          # CI：编译 + 测试 + 产物上传
 │   └── cd.yml          # CD：构建 Docker 镜像推送 GHCR
+├── .gitlab-ci.yml      # 自建 GitLab 版 CI/CD（等价配置）
 ├── src/                # 源码与测试
 ├── Dockerfile          # 多阶段构建镜像
 ├── k8s/                # Kubernetes 部署清单
@@ -80,6 +81,23 @@ push / PR 到 main
 
 - 仓库地址：`ghcr.io/li3zhi4/spring-demo`
 - 为公开镜像，任意环境可直接 `docker pull`，无需认证
+
+## GitLab CI 版本（自建 GitLab）
+
+仓库同时提供 `.gitlab-ci.yml`，供自建 GitLab 环境使用（功能与 GitHub Actions 等价）：
+
+| 阶段 | Job | 说明 |
+|------|-----|------|
+| build | `build` | `mvn clean package` 编译 + 测试，产物保留 1 周 |
+| package | `docker-build` | 构建镜像并推送 Harbor（`<sha>` + `latest` 两个 tag） |
+| deploy | `deploy` | `kubectl set image` 更新 K8s，**手动触发** |
+
+使用前在 GitLab → Settings → CI/CD → Variables 配置：
+
+- `HARBOR_REGISTRY`：Harbor 地址（默认 `harbor.example.com`，需替换）
+- `HARBOR_USER` / `HARBOR_PASSWORD`：推送账号密码
+
+> 若 Harbor 为 HTTP 或自签证书，runner 的 docker-in-docker 服务需加 `--insecure-registry`。
 
 ## Kubernetes 部署
 
